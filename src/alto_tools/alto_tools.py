@@ -67,27 +67,21 @@ def alto_text(xml, xmlns):
     if isinstance(sys.stdout, io.TextIOWrapper) and sys.stdout.encoding != "UTF-8":
         sys.stdout = codecs.getwriter("utf-8")(sys.stdout.buffer, "strict")
     # Find all <TextLine> elements
-    for lines in xml.iterfind(".//{%s}TextLine" % xmlns):
+    for line in xml.iterfind(".//{%s}TextLine" % xmlns):
         # New line after every <TextLine> element
         sys.stdout.write("\n")
         # Find all <String> elements
-        for line in lines.findall("{%s}String" % xmlns):
-            # Check if there are no hyphenated words
-            if "SUBS_CONTENT" not in line.attrib and "SUBS_TYPE" not in line.attrib:
-                # Get value of attribute @CONTENT from all <String> elements
-                text = line.attrib.get("CONTENT") + " "
-            else:
-                #  Handling of hyphenation to avoid duplicates, see
-                #  https://github.com/cneud/alto-tools/issues/16
-                if "HypPart1" in line.attrib.get("SUBS_TYPE"):
-                    # Get the first part of the hyphenated word from @CONTENT
-                    # (instead of using @SUBS_CONTENT)
-                    if "HypPart1" in line.attrib.get("SUBS_TYPE"):
-                        text = line.attrib.get("CONTENT")
-                    # Concatenate second part of the hyphenated word from @CONTENT
-                    if "HypPart2" in line.attrib.get("SUBS_TYPE"):
-                        text = line.attrib.get("CONTENT") + " "
-            sys.stdout.write(text)
+        # Do not rely on interspersed <SP> elements
+        # https://github.com/altoxml/schema/issues/54
+        text = ""
+        for word in line.findall("{%s}String" % xmlns):
+            if text:
+                text += " "
+            # Get value of attribute @CONTENT
+            text += word.attrib.get("CONTENT")
+        for hyp in line.findall("{%s}HYP" % xmlns):
+            text += hyp.attrib.get("CONTENT")
+        sys.stdout.write(text)
 
 
 def alto_illustrations(alto, xml, xmlns):
