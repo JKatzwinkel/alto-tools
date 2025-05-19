@@ -26,6 +26,18 @@ def test_alto_text(capsys):
     assert re.search(r"Stille Gedanken", captured.out)
 
 
+def test_alto_text_hyp(capsys):
+    f = open(os.path.join(datadir, "PPN750717092-00000780.ocr.xml"), "r", encoding="UTF8")
+    _, xml, xmlns = alto_tools.alto_parse(f)
+
+    alto_tools.alto_text(xml, xmlns)
+    captured = capsys.readouterr()
+    # hyphen-minus introduced
+    assert re.search(r"Ventilations-\nschachtes", captured.out)
+    # hyphen-minus contained
+    assert re.search(r"Rathans-\nhalle", captured.out)
+
+
 def create_empty_file(fn: str) -> None:
     with open(fn, "a"):
         ...
