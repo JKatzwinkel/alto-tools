@@ -61,30 +61,50 @@ def alto_parse(alto, **kargs):
         )
 
 
-def alto_text(xml, xmlns):
+def alto_text(xml, xmlns, dehyphenate=False, pb="\n", lb="\n"):
     """Extract text content from ALTO xml file"""
     # Ensure use of UTF-8
     if isinstance(sys.stdout, io.TextIOWrapper) and sys.stdout.encoding != "UTF-8":
         sys.stdout = codecs.getwriter("utf-8")(sys.stdout.buffer, "strict")
-    # Find all <TextLine> elements
-    for line in xml.iterfind(".//{%s}TextLine" % xmlns):
-        # New line after every <TextLine> element
-        sys.stdout.write("\n")
-        # Find all <String> elements
-        # Do not rely on interspersed <SP> elements
-        # https://github.com/altoxml/schema/issues/54
-        text = ""
-        for word in line.findall("{%s}String" % xmlns):
-            if text:
-                text += " "
-            # Get value of attribute @CONTENT
-            text += word.attrib.get("CONTENT")
-        for hyp in line.findall("{%s}HYP" % xmlns):
-            #text += hyp.attrib.get("CONTENT")
-            # use plain ASCII hyphen-minus instead of annotated hyphen
-            # (which could be soft-hyphen, historical forms etc.)
-            text += "-"
-        sys.stdout.write(text)
+    # Find all <TextBlock> elements
+    for block in xml.iterfind(".//{%s}TextBlock" % xmlns):
+        sys.stdout.write(pb)
+        # Find all <TextLine> elements
+        for line in block.iterfind(".//{%s}TextLine" % xmlns):
+            # New line after every <TextLine> element
+            if dehyphenate:
+                sys.stdout.write(" ")
+            else:
+                sys.stdout.write(lb)
+            text = ""
+            # Find all <String> elements
+            # Do not rely on interspersed <SP> elements
+            # https://github.com/altoxml/schema/issues/54
+            words = list(line.findall("{%s}String" % xmlns))
+            for word in words:
+                if word is words[0]:
+                    if (dehyphenate and
+                        word.attrib.get("SUBS_TYPE") and
+                        "HypPart2" in word.attrib.get("SUBS_TYPE")):
+                        continue # skip 2nd part
+                else:
+                    text += " "
+                if (word is words[-1] and dehyphenate and
+                    word.attrib.get("SUBS_TYPE") and
+                    word.attrib.get("SUBS_CONTENT") and
+                    "HypPart1" in word.attrib.get("SUBS_TYPE")):
+                    # Get the annotated dehyphenated value
+                    text += word.attrib.get("SUBS_CONTENT")
+                else:
+                    # Get value of attribute @CONTENT
+                    text += word.attrib.get("CONTENT")
+            hyp = line.find("{%s}HYP" % xmlns)
+            if hyp is not None and not dehyphenate:
+                #text += hyp.attrib.get("CONTENT")
+                # use plain ASCII hyphen-minus instead of annotated hyphen
+                # (which could be soft-hyphen, historical forms etc.)
+                text += "-"
+            sys.stdout.write(text)
 
 
 def alto_illustrations(alto, xml, xmlns):
@@ -187,8 +207,8 @@ def parse_arguments():
     parser = argparse.ArgumentParser(
         description="ALTO Tools: simple tools for performing various operations on ALTO xml files",
         add_help=True,
-        prog="alto_tools.py",
-        usage="python %(prog)s INPUT [option]",
+        prog="alto-tools",
+        usage="%(prog)s INPUT [option]",
     )
     parser.add_argument(
         "INPUT", nargs="+", help="path to ALTO file or directory containing ALTO files"
@@ -240,6 +260,12 @@ def parse_arguments():
         default=False,
         dest="statistics",
         help="extract statistical information",
+    )
+    parser.add_argument(
+        "-H",
+        "--dehyphenate",
+        action="store_true",
+        help="for text, remove newlines and hyphens",
     )
     parser.add_argument(
         "-x",
@@ -350,7 +376,7 @@ def main() -> None:
             if args.confidence:
                 confidence_sum += alto_confidence(alto, xml, xmlns)
             if args.text:
-                alto_text(xml, xmlns)
+                alto_text(xml, xmlns, dehyphenate=args.dehyphenate)
             if args.illustrations:
                 alto_illustrations(alto, xml, xmlns)
             if args.graphics:
