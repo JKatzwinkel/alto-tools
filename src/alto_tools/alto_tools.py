@@ -80,7 +80,10 @@ def alto_text(xml, xmlns):
             # Get value of attribute @CONTENT
             text += word.attrib.get("CONTENT")
         for hyp in line.findall("{%s}HYP" % xmlns):
-            text += hyp.attrib.get("CONTENT")
+            #text += hyp.attrib.get("CONTENT")
+            # use plain ASCII hyphen-minus instead of annotated hyphen
+            # (which could be soft-hyphen, historical forms etc.)
+            text += "-"
         sys.stdout.write(text)
 
 
