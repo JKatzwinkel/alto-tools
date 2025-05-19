@@ -272,6 +272,12 @@ def parse_arguments():
         help="extract statistical information",
     )
     parser.add_argument(
+        "--paragraph-break",
+        default="\n",
+        type=lambda x: x.encode('utf-8').decode('unicode_escape'),
+        help="for --text, insert this string between blocks (accepts Unicode escapes)",
+    )
+    parser.add_argument(
         "-H",
         "--dehyphenate",
         action="store_true",
@@ -391,7 +397,7 @@ def main() -> None:
             if args.confidence:
                 confidence_sum += alto_confidence(alto, xml, xmlns)
             if args.text:
-                alto_text(xml, xmlns, dehyphenate=args.dehyphenate, detect_hyphens=args.detect_hyphens)
+                alto_text(xml, xmlns, dehyphenate=args.dehyphenate, detect_hyphens=args.detect_hyphens, pb=args.paragraph_break)
             if args.illustrations:
                 alto_illustrations(alto, xml, xmlns)
             if args.graphics:
