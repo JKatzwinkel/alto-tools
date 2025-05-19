@@ -61,7 +61,7 @@ def alto_parse(alto, **kargs):
         )
 
 
-def alto_text(xml, xmlns, dehyphenate=False, pb="\n", lb="\n"):
+def alto_text(xml, xmlns, dehyphenate=False, detect_hyphens="", pb="\n", lb="\n"):
     """Extract text content from ALTO xml file"""
     # Ensure use of UTF-8
     if isinstance(sys.stdout, io.TextIOWrapper) and sys.stdout.encoding != "UTF-8":
@@ -69,11 +69,12 @@ def alto_text(xml, xmlns, dehyphenate=False, pb="\n", lb="\n"):
     # Find all <TextBlock> elements
     for block in xml.iterfind(".//{%s}TextBlock" % xmlns):
         sys.stdout.write(pb)
+        wb = ""
         # Find all <TextLine> elements
         for line in block.iterfind(".//{%s}TextLine" % xmlns):
             # New line after every <TextLine> element
             if dehyphenate:
-                sys.stdout.write(" ")
+                sys.stdout.write(wb)
             else:
                 sys.stdout.write(lb)
             text = ""
@@ -95,9 +96,18 @@ def alto_text(xml, xmlns, dehyphenate=False, pb="\n", lb="\n"):
                     "HypPart1" in word.attrib.get("SUBS_TYPE")):
                     # Get the annotated dehyphenated value
                     text += word.attrib.get("SUBS_CONTENT")
+                    wb = ""
+                elif (word is words[-1] and dehyphenate and
+                      detect_hyphens and
+                      any(word.attrib.get("CONTENT").endswith(hyphen)
+                          for hyphen in detect_hyphens)):
+                    # Omit the final character
+                    text += word.attrib.get("CONTENT")[:-1]
+                    wb = ""
                 else:
                     # Get value of attribute @CONTENT
                     text += word.attrib.get("CONTENT")
+                    wb = " "
             hyp = line.find("{%s}HYP" % xmlns)
             if hyp is not None and not dehyphenate:
                 #text += hyp.attrib.get("CONTENT")
@@ -265,7 +275,12 @@ def parse_arguments():
         "-H",
         "--dehyphenate",
         action="store_true",
-        help="for text, remove newlines and hyphens",
+        help="for --text, remove newlines and hyphens",
+    )
+    parser.add_argument(
+        "--detect-hyphens",
+        default="",
+        help="for --text --dehyphenate, also interprete these characters as hyphen at EOL",
     )
     parser.add_argument(
         "-x",
@@ -376,7 +391,7 @@ def main() -> None:
             if args.confidence:
                 confidence_sum += alto_confidence(alto, xml, xmlns)
             if args.text:
-                alto_text(xml, xmlns, dehyphenate=args.dehyphenate)
+                alto_text(xml, xmlns, dehyphenate=args.dehyphenate, detect_hyphens=args.detect_hyphens)
             if args.illustrations:
                 alto_illustrations(alto, xml, xmlns)
             if args.graphics:
