@@ -67,7 +67,26 @@ def alto_text(xml, xmlns, dehyphenate=False, detect_hyphens="", pb="\n", lb="\n"
     if isinstance(sys.stdout, io.TextIOWrapper) and sys.stdout.encoding != "UTF-8":
         sys.stdout = codecs.getwriter("utf-8")(sys.stdout.buffer, "strict")
     # Find all <TextBlock> elements
-    for block in xml.iterfind(".//{%s}TextBlock" % xmlns):
+    blocks = list(xml.iterfind(".//{%s}TextBlock" % xmlns))
+    blocks = {block.get("ID"): block for block in blocks}
+    if (readingorder := xml.find(".//{%s}ReadingOrder" % xmlns)) is not None:
+        group = (readingorder.find("{%s}OrderedGroup" % xmlns) or
+                 readingorder.find("{%s}UnorderedGroup" % xmlns))
+        order = [groupref.get("REF") for groupref in group.iter("*") if "REF" in groupref.attrib]
+        # FIXME: ALTO ReadingOrder @REF can also target TextLine and String
+        # adding TextLine and String elements to block list is not sufficient though:
+        # we need to iterate over lowest-level sequence below...
+        assert all(block_id in blocks for block_id in order), "ReadingOrder references below block level currently not supported"
+    elif any(block.get("IDNEXT") for block in blocks.values()):
+        pairs = {block_id: block.get("IDNEXT") for block_id, block in blocks.items()}
+        block = next(block for block in pairs if block not in pairs.values())
+        order = [block]
+        while block := pairs.get(block, None):
+            order.append(block)
+    else:
+        order = list(blocks.keys())
+    for block_id in order:
+        block = blocks[block_id]
         sys.stdout.write(pb)
         wb = ""
         # Find all <TextLine> elements
