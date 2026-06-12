@@ -61,32 +61,78 @@ def alto_parse(alto, **kargs):
         )
 
 
-def alto_text(xml, xmlns):
+def alto_text(xml, xmlns, dehyphenate=False, detect_hyphens="", pb="\n", lb="\n"):
     """Extract text content from ALTO xml file"""
     # Ensure use of UTF-8
     if isinstance(sys.stdout, io.TextIOWrapper) and sys.stdout.encoding != "UTF-8":
         sys.stdout = codecs.getwriter("utf-8")(sys.stdout.buffer, "strict")
-    # Find all <TextLine> elements
-    for lines in xml.iterfind(".//{%s}TextLine" % xmlns):
-        # New line after every <TextLine> element
-        sys.stdout.write("\n")
-        # Find all <String> elements
-        for line in lines.findall("{%s}String" % xmlns):
-            # Check if there are no hyphenated words
-            if "SUBS_CONTENT" not in line.attrib and "SUBS_TYPE" not in line.attrib:
-                # Get value of attribute @CONTENT from all <String> elements
-                text = line.attrib.get("CONTENT") + " "
+    # Find all <TextBlock> elements
+    blocks = list(xml.iterfind(".//{%s}TextBlock" % xmlns))
+    blocks = {block.get("ID"): block for block in blocks}
+    if (readingorder := xml.find(".//{%s}ReadingOrder" % xmlns)) is not None:
+        group = (readingorder.find("{%s}OrderedGroup" % xmlns) or
+                 readingorder.find("{%s}UnorderedGroup" % xmlns))
+        order = [groupref.get("REF") for groupref in group.iter("*") if "REF" in groupref.attrib]
+        # FIXME: ALTO ReadingOrder @REF can also target TextLine and String
+        # adding TextLine and String elements to block list is not sufficient though:
+        # we need to iterate over lowest-level sequence below...
+        assert all(block_id in blocks for block_id in order), "ReadingOrder references below block level currently not supported"
+    elif any(block.get("IDNEXT") for block in blocks.values()):
+        pairs = {block_id: block.get("IDNEXT") for block_id, block in blocks.items()}
+        block = next(block for block in pairs if block not in pairs.values())
+        order = [block]
+        while block := pairs.get(block, None):
+            order.append(block)
+    else:
+        order = list(blocks.keys())
+    for block_id in order:
+        block = blocks[block_id]
+        sys.stdout.write(pb)
+        wb = ""
+        # Find all <TextLine> elements
+        for line in block.iterfind(".//{%s}TextLine" % xmlns):
+            # New line after every <TextLine> element
+            if dehyphenate:
+                sys.stdout.write(wb)
             else:
-                #  Handling of hyphenation to avoid duplicates, see
-                #  https://github.com/cneud/alto-tools/issues/16
-                if "HypPart1" in line.attrib.get("SUBS_TYPE"):
-                    # Get the first part of the hyphenated word from @CONTENT
-                    # (instead of using @SUBS_CONTENT)
-                    if "HypPart1" in line.attrib.get("SUBS_TYPE"):
-                        text = line.attrib.get("CONTENT")
-                    # Concatenate second part of the hyphenated word from @CONTENT
-                    if "HypPart2" in line.attrib.get("SUBS_TYPE"):
-                        text = line.attrib.get("CONTENT") + " "
+                sys.stdout.write(lb)
+            text = ""
+            # Find all <String> elements
+            # Do not rely on interspersed <SP> elements
+            # https://github.com/altoxml/schema/issues/54
+            words = list(line.findall("{%s}String" % xmlns))
+            for word in words:
+                if word is words[0]:
+                    if (dehyphenate and
+                        word.attrib.get("SUBS_TYPE") and
+                        "HypPart2" in word.attrib.get("SUBS_TYPE")):
+                        continue # skip 2nd part
+                else:
+                    text += " "
+                if (word is words[-1] and dehyphenate and
+                    word.attrib.get("SUBS_TYPE") and
+                    word.attrib.get("SUBS_CONTENT") and
+                    "HypPart1" in word.attrib.get("SUBS_TYPE")):
+                    # Get the annotated dehyphenated value
+                    text += word.attrib.get("SUBS_CONTENT")
+                    wb = ""
+                elif (word is words[-1] and dehyphenate and
+                      detect_hyphens and
+                      any(word.attrib.get("CONTENT").endswith(hyphen)
+                          for hyphen in detect_hyphens)):
+                    # Omit the final character
+                    text += word.attrib.get("CONTENT")[:-1]
+                    wb = ""
+                else:
+                    # Get value of attribute @CONTENT
+                    text += word.attrib.get("CONTENT")
+                    wb = " "
+            hyp = line.find("{%s}HYP" % xmlns)
+            if hyp is not None and not dehyphenate:
+                #text += hyp.attrib.get("CONTENT")
+                # use plain ASCII hyphen-minus instead of annotated hyphen
+                # (which could be soft-hyphen, historical forms etc.)
+                text += "-"
             sys.stdout.write(text)
 
 
@@ -190,8 +236,8 @@ def parse_arguments():
     parser = argparse.ArgumentParser(
         description="ALTO Tools: simple tools for performing various operations on ALTO xml files",
         add_help=True,
-        prog="alto_tools.py",
-        usage="python %(prog)s INPUT [option]",
+        prog="alto-tools",
+        usage="%(prog)s INPUT [option]",
     )
     parser.add_argument(
         "INPUT", nargs="+", help="path to ALTO file or directory containing ALTO files"
@@ -243,6 +289,23 @@ def parse_arguments():
         default=False,
         dest="statistics",
         help="extract statistical information",
+    )
+    parser.add_argument(
+        "--paragraph-break",
+        default="\n",
+        type=lambda x: x.encode('utf-8').decode('unicode_escape'),
+        help="for --text, insert this string between blocks (accepts Unicode escapes)",
+    )
+    parser.add_argument(
+        "-H",
+        "--dehyphenate",
+        action="store_true",
+        help="for --text, remove newlines and hyphens",
+    )
+    parser.add_argument(
+        "--detect-hyphens",
+        default="",
+        help="for --text --dehyphenate, also interprete these characters as hyphen at EOL",
     )
     parser.add_argument(
         "-x",
@@ -353,7 +416,7 @@ def main() -> None:
             if args.confidence:
                 confidence_sum += alto_confidence(alto, xml, xmlns)
             if args.text:
-                alto_text(xml, xmlns)
+                alto_text(xml, xmlns, dehyphenate=args.dehyphenate, detect_hyphens=args.detect_hyphens, pb=args.paragraph_break)
             if args.illustrations:
                 alto_illustrations(alto, xml, xmlns)
             if args.graphics:
